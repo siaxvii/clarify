@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { addFavorite, removeFavorite, isFavorited } from "../../lib/favorites";
 import {
   View,
   Text,
@@ -12,17 +13,19 @@ import {
   Dimensions,
   Modal,
   StyleSheet,
+  
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 
 const API_BASE_URL = "https://overfunctioning-noncondensable-torie.ngrok-free.dev";
-
 const { height: SCREEN_H } = Dimensions.get("window");
 
-// Snap points (tweak these numbers if you want)
-const SHEET_EXPANDED_Y = 50;               // closer to top = more expanded
-const SHEET_COLLAPSED_Y = SCREEN_H - 320;   // bottom peek height
+const SHEET_EXPANDED_Y = 50;              
+const SHEET_COLLAPSED_Y = SCREEN_H - 420;   
+
+
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -34,19 +37,14 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [ingredientOpen, setIngredientOpen] = useState(false);
   const [selectedIngredient, setSelectedIngredient] = useState<any>(null);
-  const backdropOpacity = useRef(new Animated.Value(0)).current; // NEW
-  const ingredientTranslateY = useRef(new Animated.Value(40)).current; // keep
-  
-
-
-
-
-  // Lock scanning once scanned or loading
+  const backdropOpacity = useRef(new Animated.Value(0)).current; 
+  const ingredientTranslateY = useRef(new Animated.Value(40)).current; 
   const scanLocked = useMemo(() => Boolean(scannedBarcode) || loading, [scannedBarcode, loading]);
-
-  // Bottom sheet animated Y position
   const sheetY = useRef(new Animated.Value(SHEET_COLLAPSED_Y)).current;
   const sheetYValue = useRef(SHEET_COLLAPSED_Y);
+
+  const [favorited, setFavorited] = useState(false);
+
 
   useEffect(() => {
     const id = sheetY.addListener(({ value }) => {
@@ -62,7 +60,6 @@ export default function HomeScreen() {
   useEffect(() => {
   if (!ingredientOpen) return;
 
-  // Start positions
   backdropOpacity.setValue(0);
   ingredientTranslateY.setValue(40);
 
@@ -88,7 +85,7 @@ export default function HomeScreen() {
       toValue: toY,
       duration: 220,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false, // translateY supports native driver, but we're using layout-ish values; keep simple
+      useNativeDriver: false, 
     }).start();
   }
 
@@ -133,14 +130,14 @@ function closeIngredientModal() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/lookup/${encodeURIComponent(cleaned)}`);
       const json = await res.json();
+      
       setData(json);
-
       if (!res.ok) {
         setError("Product not found in demo database.");
-        // keep sheet collapsed-ish so user can retry
         snapTo(SHEET_COLLAPSED_Y);
       } else {
-        // ✅ Success: pull up the sheet like Yuka
+        const isFav = await isFavorited(json.product.barcode);
+        setFavorited(isFav);
         snapTo(SHEET_EXPANDED_Y);
       }
     } catch (err: any) {
@@ -151,26 +148,22 @@ function closeIngredientModal() {
     }
   }
 
-  // Drag behavior
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 6,
       onPanResponderMove: (_, gesture) => {
         const next = sheetYValue.current + gesture.dy;
-        // clamp
         const clamped = Math.max(SHEET_EXPANDED_Y, Math.min(SHEET_COLLAPSED_Y, next));
         sheetY.setValue(clamped);
       },
       onPanResponderRelease: (_, gesture) => {
-        // Decide snap based on where we ended + swipe velocity
         const endY = sheetYValue.current;
         const midpoint = (SHEET_EXPANDED_Y + SHEET_COLLAPSED_Y) / 2;
 
-        // If user flicks up fast, expand. If flicks down fast, collapse.
+
         if (gesture.vy < -0.6) return snapTo(SHEET_EXPANDED_Y);
         if (gesture.vy > 0.6) return snapTo(SHEET_COLLAPSED_Y);
 
-        // Otherwise snap to nearest
         snapTo(endY < midpoint ? SHEET_EXPANDED_Y : SHEET_COLLAPSED_Y);
       },
     })
@@ -197,7 +190,7 @@ function closeIngredientModal() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      {/* CAMERA BACKGROUND */}
+      {/* Camera BG */}
       <CameraView
         style={StyleSheet.absoluteFillObject}
         barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "qr", "code128"] }}
@@ -208,7 +201,7 @@ function closeIngredientModal() {
         }}
       />
 
-      {/* Scan overlay box (only when we haven't scanned yet) */}
+      {/* Scan overlay box */}
       {!scannedBarcode && (
         <View style={styles.scanOverlay} pointerEvents="none">
           <View style={styles.scanFrame}>
@@ -220,7 +213,7 @@ function closeIngredientModal() {
         </View>
       )}
 
-      {/* BOTTOM SHEET */}
+      {/* Bottom Sheet */}
       <Animated.View
         style={[
           styles.sheet,
@@ -229,7 +222,7 @@ function closeIngredientModal() {
           },
         ]}
       >
-        {/* Handle / draggable header */}
+        {/* draggable header */}
         <View style={styles.sheetHandleArea}>
           {/* Header row */}
           <View style={styles.headerRow}>
@@ -260,7 +253,7 @@ function closeIngredientModal() {
         {/* Content */}
         <Animated.ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 160, gap: 12 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 230, gap: 12 }}
         showsVerticalScrollIndicator={false}
         >
           {/* If no scan yet, show manual lookup */}
@@ -287,16 +280,62 @@ function closeIngredientModal() {
             </View>
           )}
 
-          {/* Loading */}
           {loading && <ActivityIndicator />}
 
-          {/* Product result */}
           {data && data.found && (
             
   <View style={{ marginTop: 16, marginHorizontal: 16, padding: 16, backgroundColor: "white", borderRadius: 24 }}>
     <ProductImage uri={data.product.imageUrl} />
     <Text style={{ fontSize: 20, fontWeight: "700", marginTop: 4 , paddingTop:12}}>{data.product.name}</Text>
     <Text style={{ opacity: 0.6 }}>{data.product.brand} • {data.product.category}</Text>
+
+    <Pressable
+    onPress={async () => {
+    const p = data.product;
+    if (!favorited) {
+      await addFavorite({
+        barcode: p.barcode,
+        name: p.name,
+        brand: p.brand,
+        category: p.category,
+        imageUrl: p.imageUrl,
+        safetyScore: p.safetyScore,
+      });
+      setFavorited(true);
+    } else {
+      await removeFavorite(p.barcode);
+      setFavorited(false);
+    }
+  }}
+  style={{
+    marginTop: 12,
+    alignSelf: "center",              
+    flexDirection: "row",             
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#000000",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    minWidth: 200,                   
+  }}
+>
+
+  {!favorited && (
+    <Ionicons
+      name="bookmark"
+      size={15}
+      color="white"
+    />
+  )}
+
+  <Text style={{ color: "white", fontWeight: "900" }}>
+    {favorited ? "Saved ✓" : "Save to Favorites"}
+  </Text>
+</Pressable>
+
+
 
     {/* Score row */}
     {(() => {
@@ -317,7 +356,6 @@ function closeIngredientModal() {
 
     <Text style={{ marginTop: 12 }}>{data.product.description}</Text>
 
-    {/* Ingredients summary */}
     {/* Ingredients */}
 {(() => {
   const all = data.product.ingredients || [];
@@ -416,7 +454,7 @@ function closeIngredientModal() {
 >
   <View style={{ flex: 1, justifyContent: "flex-end" }}>
 
-    {/* BACKDROP — fades only */}
+    {/* Backdrop - fades */}
     <Pressable
       onPress={closeIngredientModal}
       style={StyleSheet.absoluteFillObject}
@@ -430,7 +468,7 @@ function closeIngredientModal() {
       />
     </Pressable>
 
-    {/* WHITE SHEET — slides only */}
+    {/* white sheet — slides */}
     <Animated.View
       style={{
         backgroundColor: "white",
@@ -476,7 +514,7 @@ function closeIngredientModal() {
           padding: 12,
           borderRadius: 14,
           alignItems: "center"
-        }}
+        }} 
       >
         <Text style={{ color: "white", fontWeight: "900" }}>Close</Text>
       </Pressable>
@@ -509,23 +547,23 @@ function scoreMeta(score: number) {
   if (score >= 85) {
     return {
       label: "Clean",
-      ring: "#16A34A",       // green
-      bg: "#ECFDF5",         // light green
+      ring: "#16A34A",       
+      bg: "#ECFDF5",         
       text: "#166534",
     };
   }
   if (score >= 65) {
     return {
       label: "Moderate",
-      ring: "#F59E0B",       // amber
-      bg: "#FFFBEB",         // light amber
+      ring: "#F59E0B",       
+      bg: "#FFFBEB",         
       text: "#92400E",
     };
   }
   return {
     label: "Caution",
-    ring: "#EF4444",         // red
-    bg: "#FEF2F2",           // light red
+    ring: "#EF4444",         
+    bg: "#FEF2F2",           
     text: "#991B1B",
   };
 }
@@ -542,8 +580,8 @@ function SafetyMeter({
   const s = Math.max(0, Math.min(100, score));
   const meta = scoreMeta(s);
 
-  // Ring sizing
-  const size = 52; // outer size
+
+  const size = 52; 
   const stroke = 6;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -617,6 +655,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
+    paddingBottom: 150, 
   },
   scanFrame: {
     width: "82%",
@@ -635,16 +674,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0, 
     height: SCREEN_H,
-    backgroundColor: "#F6F6F6",
+    backgroundColor: "#ebf0eb",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: "hidden",
   },
   sheetHandleArea: {
-    paddingTop: 10,
+    paddingTop: 20,
     paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: "white",
+    paddingBottom: 20,
+    backgroundColor: "#D5E8D4",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
   },
